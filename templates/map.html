@@ -170,7 +170,10 @@
         <input type="text" id="addressInput" placeholder="输入地址进行搜索...">
         <input type="text" id="poiKeywords" placeholder="搜索周边POI（如：餐厅、酒店）">
     </div>
-
+    <div class="user-info" style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+        <span>欢迎，{{ username }}</span>
+        <a href="{{ url_for('logout') }}" class="btn-secondary" style="text-decoration: none;">退出登录</a>
+    </div>
     <div class="btn-group">
         <button class="btn-primary" onclick="searchAddress()">🔍 地址搜索</button>
         <button class="btn-secondary" onclick="addMarkerAtCenter()">📌 添加标记</button>
@@ -416,4 +419,5 @@
     });
 </script>
 </body>
+
 </html>
