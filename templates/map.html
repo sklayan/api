@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python地图应用</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: #f5f5f5;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .header .subtitle {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .control-panel {
+            background: white;
+            padding: 15px;
+            margin: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .search-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .search-group input {
+            flex: 1;
+            min-width: 200px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5a6fd8;
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: #f8f9fa;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+
+        .btn-secondary:hover {
+            background: #e9ecef;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        #map-container {
+            height: 500px;
+            margin: 15px;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .info-panel {
+            background: white;
+            padding: 15px;
+            margin: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .info-item {
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .info-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+
+        .coordinates {
+            font-family: monospace;
+            background: #f8f9fa;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+
+        .status-message {
+            padding: 10px;
+            margin: 10px 15px;
+            border-radius: 5px;
+            text-align: center;
+            display: none;
+        }
+
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h1>🚀 Python + 高德地图应用</h1>
+    <div class="subtitle">基于Flask和高德API的简单地图功能演示</div>
+</div>
+
+<div class="control-panel">
+    <div class="search-group">
+        <input type="text" id="addressInput" placeholder="输入地址进行搜索...">
+        <input type="text" id="poiKeywords" placeholder="搜索周边POI（如：餐厅、酒店）">
+    </div>
+
+    <div class="btn-group">
+        <button class="btn-primary" onclick="searchAddress()">🔍 地址搜索</button>
+        <button class="btn-secondary" onclick="addMarkerAtCenter()">📌 添加标记</button>
+        <button class="btn-secondary" onclick="searchPOI()">🏪 搜索周边</button>
+        <button class="btn-danger" onclick="clearMap()">🗑️ 清除地图</button>
+        <button class="btn-secondary" onclick="locateMe()">📍 我的位置</button>
+    </div>
+</div>
+
+<div id="statusMessage" class="status-message"></div>
+
+<div id="map-container"></div>
+
+<div class="info-panel">
+    <h3>位置信息</h3>
+    <div id="locationInfo">
+        <div class="info-item">点击地图查看位置信息...</div>
+    </div>
+</div>
+
+<!-- 高德地图JS API -->
+<script src="https://webapi.amap.com/maps?v=1.4.15&key={{ map_key }}&plugin=AMap.Geocoder,AMap.PlaceSearch,AMap.ToolBar,AMap.Scale"></script>
+<script>
+    // 初始化地图
+    var map = new AMap.Map('map-container', {
+        zoom: 13,
+        center: [116.397428, 39.90923], // 北京中心
+        viewMode: '3D'
+    });
+
+    // 添加工具栏
+    map.addControl(new AMap.ToolBar());
+    map.addControl(new AMap.Scale());
+
+    var markers = [];
+    var currentLocation = null;
+
+    // 显示状态消息
+    function showMessage(message, type = 'success') {
+        const element = document.getElementById('statusMessage');
+        element.textContent = message;
+        element.className = `status-message status-${type}`;
+        element.style.display = 'block';
+        setTimeout(() => {
+            element.style.display = 'none';
+        }, 3000);
+    }
+
+    // 地址搜索
+    async function searchAddress() {
+        const address = document.getElementById('addressInput').value.trim();
+        if (!address) {
+            showMessage('请输入要搜索的地址', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/geocode?address=${encodeURIComponent(address)}`);
+            const data = await response.json();
+
+            if (data.success) {
+                const lng = data.location.lng;
+                const lat = data.location.lat;
+
+                // 移动地图中心
+                map.setCenter([lng, lat]);
+                map.setZoom(16);
+
+                // 添加标记
+                const marker = new AMap.Marker({
+                    position: [lng, lat],
+                    map: map
+                });
+
+                // 信息窗口
+                const infoWindow = new AMap.InfoWindow({
+                    content: `
+                            <div style="padding: 10px;">
+                                <h4>${data.formatted_address}</h4>
+                                <p>区域：${data.district}</p>
+                                <p>坐标：${lng.toFixed(6)}, ${lat.toFixed(6)}</p>
+                            </div>
+                        `
+                });
+
+                marker.on('click', () => {
+                    infoWindow.open(map, marker.getPosition());
+                });
+
+                markers.push(marker);
+                showMessage(`成功定位到：${data.formatted_address}`);
+
+            } else {
+                showMessage(data.error || '地址搜索失败', 'error');
+            }
+        } catch (error) {
+            showMessage('搜索过程中发生错误', 'error');
+            console.error('Search error:', error);
+        }
+    }
+
+    // 在中心点添加标记
+    function addMarkerAtCenter() {
+        const center = map.getCenter();
+        const marker = new AMap.Marker({
+            position: [center.lng, center.lat],
+            map: map
+        });
+
+        markers.push(marker);
+        showMessage('标记添加成功');
+    }
+
+    // 搜索周边POI
+    async function searchPOI() {
+        const keywords = document.getElementById('poiKeywords').value.trim();
+        if (!keywords) {
+            showMessage('请输入要搜索的关键词', 'error');
+            return;
+        }
+
+        const center = map.getCenter();
+        const location = `${center.lng},${center.lat}`;
+
+        try {
+            const response = await fetch(`/search_poi?keywords=${encodeURIComponent(keywords)}&location=${location}`);
+            const data = await response.json();
+
+            if (data.success) {
+                // 清除之前的POI标记
+                markers.forEach(marker => map.remove(marker));
+                markers = [];
+
+                data.pois.forEach(poi => {
+                    const [lng, lat] = poi.location.split(',').map(Number);
+                    const marker = new AMap.Marker({
+                        position: [lng, lat],
+                        map: map,
+                        title: poi.name
+                    });
+
+                    const infoWindow = new AMap.InfoWindow({
+                        content: `
+                                <div style="padding: 10px;">
+                                    <h4>${poi.name}</h4>
+                                    <p>类型：${poi.type}</p>
+                                    <p>地址：${poi.address || '无'}</p>
+                                    <p>距离：${poi.distance}米</p>
+                                </div>
+                            `
+                    });
+
+                    marker.on('click', () => {
+                        infoWindow.open(map, marker.getPosition());
+                    });
+
+                    markers.push(marker);
+                });
+
+                showMessage(`找到 ${data.pois.length} 个结果`);
+            } else {
+                showMessage(data.error || '搜索失败', 'error');
+            }
+        } catch (error) {
+            showMessage('搜索过程中发生错误', 'error');
+            console.error('POI search error:', error);
+        }
+    }
+
+    // 清除地图
+    function clearMap() {
+        markers.forEach(marker => map.remove(marker));
+        markers = [];
+        document.getElementById('locationInfo').innerHTML = '<div class="info-item">点击地图查看位置信息...</div>';
+        showMessage('地图已清除');
+    }
+
+    // 定位我的位置
+    function locateMe() {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lng = position.coords.longitude;
+                    const lat = position.coords.latitude;
+
+                    map.setCenter([lng, lat]);
+                    map.setZoom(16);
+
+                    const marker = new AMap.Marker({
+                        position: [lng, lat],
+                        map: map,
+                        title: '我的位置'
+                    });
+
+                    markers.push(marker);
+                    showMessage('定位成功');
+                },
+                (error) => {
+                    showMessage('定位失败：' + error.message, 'error');
+                }
+            );
+        } else {
+            showMessage('浏览器不支持地理定位', 'error');
+        }
+    }
+
+    // 地图点击事件
+    map.on('click', async function(e) {
+        const lng = e.lnglat.getLng();
+        const lat = e.lnglat.getLat();
+
+        // 更新坐标显示
+        document.getElementById('locationInfo').innerHTML = `
+                <div class="info-item">
+                    <strong>坐标：</strong>
+                    <span class="coordinates">${lng.toFixed(6)}, ${lat.toFixed(6)}</span>
+                </div>
+                <div class="info-item">正在获取地址信息...</div>
+            `;
+
+        // 逆地理编码
+        try {
+            const response = await fetch(`/reverse_geocode?lng=${lng}&lat=${lat}`);
+            const data = await response.json();
+
+            if (data.success) {
+                document.getElementById('locationInfo').innerHTML = `
+                        <div class="info-item">
+                            <strong>坐标：</strong>
+                            <span class="coordinates">${lng.toFixed(6)}, ${lat.toFixed(6)}</span>
+                        </div>
+                        <div class="info-item">
+                            <strong>地址：</strong>${data.address}
+                        </div>
+                        <div class="info-item">
+                            <strong>区域：</strong>${data.province} ${data.city} ${data.district}
+                        </div>
+                    `;
+            }
+        } catch (error) {
+            console.error('Reverse geocode error:', error);
+        }
+    });
+</script>
+</body>
+</html>
