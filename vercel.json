@@ -24,4 +24,8 @@
       "dest": "/app.py"
     }
   ]
+  "env": {
+    "PYTHONPATH": "@"
+  }
 }
+
