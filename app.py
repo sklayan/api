@@ -10,7 +10,13 @@ from datetime import datetime
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+# 从环境变量获取 SECRET_KEY，如果没有则报错
+secret_key = os.getenv('SECRET_KEY')
+if not secret_key:
+    raise ValueError("SECRET_KEY 环境变量未设置！请在 Vercel 环境变量中设置。")
+
+app.secret_key = secret_key
 
 # Flask-Login 配置
 login_manager = LoginManager()
@@ -23,13 +29,19 @@ DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
     'database': os.getenv('DB_NAME', 'amap_app'),
     'user': os.getenv('DB_USER', 'amap_user'),
-    'password': os.getenv('DB_PASSWORD', 'your_secure_password'),
+    'password': os.getenv('DB_PASSWORD', ''),
     'port': os.getenv('DB_PORT', 5432)
 }
 
 # 高德API配置
-AMAP_WEB_KEY = os.getenv('AMAP_WEB_KEY', '你的Web端JS API Key')
-AMAP_SERVICE_KEY = os.getenv('AMAP_SERVICE_KEY', '你的Web服务Key')
+AMAP_WEB_KEY = os.getenv('AMAP_WEB_KEY', '')
+AMAP_SERVICE_KEY = os.getenv('AMAP_SERVICE_KEY', '')
+
+# 检查必要环境变量
+required_env_vars = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'AMAP_WEB_KEY', 'AMAP_SERVICE_KEY']
+missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+if missing_vars:
+    raise ValueError(f"缺少必要的环境变量: {', '.join(missing_vars)}")
 
 class User(UserMixin):
     def __init__(self, id, username, email):
@@ -286,6 +298,3 @@ def search_poi():
             return jsonify({'success': False, 'error': '搜索失败'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
-
-# Vercel 需要这个
-app = app
