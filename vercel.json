@@ -4,15 +4,24 @@
     {
       "src": "app.py",
       "use": "@vercel/python"
+    },
+    {
+      "src": "templates/**",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "static/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
     {
+      "src": "/static/(.*)",
+      "dest": "/static/$1"
+    },
+    {
       "src": "/(.*)",
       "dest": "/app.py"
     }
-  ],
-  "env": {
-    "PYTHONPATH": "@"
-  }
+  ]
 }
