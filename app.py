@@ -5,17 +5,15 @@ import requests
 import os
 import psycopg2
 from dotenv import load_dotenv
-from datetime import datetime
 
-load_dotenv()
+# 只在本地加载环境变量
+if os.path.exists('.env.local'):
+    load_dotenv('.env.local')
 
 app = Flask(__name__)
 
-# 从环境变量获取 SECRET_KEY，如果没有则报错
-secret_key = os.getenv('SECRET_KEY')
-if not secret_key:
-    raise ValueError("SECRET_KEY 环境变量未设置！请在 Vercel 环境变量中设置。")
-
+# 从环境变量获取配置
+secret_key = os.getenv('SECRET_KEY', 'vercel-default-secret-key-change-in-production')
 app.secret_key = secret_key
 
 # Flask-Login 配置
@@ -24,24 +22,33 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 login_manager.login_message = '请先登录以访问此页面。'
 
-# 数据库配置
+# 数据库配置 - 使用Vercel环境变量
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'database': os.getenv('DB_NAME', 'amap_app'),
-    'user': os.getenv('DB_USER', 'amap_user'),
-    'password': os.getenv('DB_PASSWORD', ''),
-    'port': os.getenv('DB_PORT', 5432)
+    'host': os.getenv('POSTGRES_HOST'),
+    'database': os.getenv('POSTGRES_DATABASE'),
+    'user': os.getenv('POSTGRES_USER'),
+    'password': os.getenv('POSTGRES_PASSWORD'),
+    'port': int(os.getenv('POSTGRES_PORT', 5432))
 }
 
 # 高德API配置
-AMAP_WEB_KEY = os.getenv('AMAP_WEB_KEY', '')
-AMAP_SERVICE_KEY = os.getenv('AMAP_SERVICE_KEY', '')
+AMAP_WEB_KEY = os.getenv('AMAP_WEB_KEY')
+AMAP_SERVICE_KEY = os.getenv('AMAP_SERVICE_KEY')
 
 # 检查必要环境变量
-required_env_vars = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'AMAP_WEB_KEY', 'AMAP_SERVICE_KEY']
-missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-if missing_vars:
-    raise ValueError(f"缺少必要的环境变量: {', '.join(missing_vars)}")
+def check_environment():
+    missing_configs = []
+    if not AMAP_WEB_KEY:
+        missing_configs.append('AMAP_WEB_KEY')
+    if not AMAP_SERVICE_KEY:
+        missing_configs.append('AMAP_SERVICE_KEY')
+    if not all([DB_CONFIG['host'], DB_CONFIG['database'], DB_CONFIG['user'], DB_CONFIG['password']]):
+        missing_configs.append('数据库配置')
+    
+    if missing_configs:
+        print("⚠️  警告: 以下配置缺失:", ", ".join(missing_configs))
+        return False
+    return True
 
 class User(UserMixin):
     def __init__(self, id, username, email):
@@ -51,41 +58,65 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('SELECT id, username, email FROM users WHERE id = %s', (user_id,))
-    user_data = cur.fetchone()
-    cur.close()
-    conn.close()
-
-    if user_data:
-        return User(id=user_data[0], username=user_data[1], email=user_data[2])
-    return None
+    conn = None
+    cur = None
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return None
+        cur = conn.cursor()
+        cur.execute('SELECT id, username, email FROM users WHERE id = %s', (user_id,))
+        user_data = cur.fetchone()
+        if user_data:
+            return User(id=user_data[0], username=user_data[1], email=user_data[2])
+        return None
+    except Exception as e:
+        print(f"加载用户失败: {e}")
+        return None
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 def get_db_connection():
-    return psycopg2.connect(**DB_CONFIG)
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        return conn
+    except Exception as e:
+        print(f"❌ 数据库连接失败: {e}")
+        return None
 
 def init_db():
-    """初始化数据库表（如果不存在）"""
+    """初始化数据库表"""
     conn = get_db_connection()
-    cur = conn.cursor()
+    if conn is None:
+        print("❌ 无法连接到数据库，跳过初始化")
+        return
+        
+    cur = None
+    try:
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(80) UNIQUE NOT NULL,
+                email VARCHAR(120) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.commit()
+        print("✅ 数据库初始化成功")
+    except Exception as e:
+        print(f"❌ 数据库初始化失败: {e}")
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
-    # 检查表是否存在，不存在则创建
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            username VARCHAR(80) UNIQUE NOT NULL,
-            email VARCHAR(120) UNIQUE NOT NULL,
-            password_hash VARCHAR(255) NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-# 调用初始化数据库
+# 初始化数据库
 init_db()
 
 # 路由定义
@@ -106,19 +137,31 @@ def login():
         password = request.form.get('password')
 
         conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT id, username, email, password_hash FROM users WHERE username = %s', (username,))
-        user_data = cur.fetchone()
-        cur.close()
-        conn.close()
+        if conn is None:
+            flash('数据库连接失败', 'error')
+            return render_template('login.html')
 
-        if user_data and check_password_hash(user_data[3], password):
-            user = User(id=user_data[0], username=user_data[1], email=user_data[2])
-            login_user(user)
-            next_page = request.args.get('next')
-            return redirect(next_page or url_for('index'))
-        else:
-            flash('用户名或密码错误', 'error')
+        cur = None
+        try:
+            cur = conn.cursor()
+            cur.execute('SELECT id, username, email, password_hash FROM users WHERE username = %s', (username,))
+            user_data = cur.fetchone()
+
+            if user_data and check_password_hash(user_data[3], password):
+                user = User(id=user_data[0], username=user_data[1], email=user_data[2])
+                login_user(user)
+                next_page = request.args.get('next')
+                return redirect(next_page or url_for('index'))
+            else:
+                flash('用户名或密码错误', 'error')
+
+        except Exception as e:
+            flash(f'登录失败: {str(e)}', 'error')
+        finally:
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
 
     return render_template('login.html')
 
@@ -146,11 +189,16 @@ def register():
             flash('密码长度至少6位', 'error')
             return render_template('register.html')
 
-        # 检查用户是否已存在
         conn = get_db_connection()
-        cur = conn.cursor()
+        if conn is None:
+            flash('数据库连接失败', 'error')
+            return render_template('register.html')
 
+        cur = None
         try:
+            cur = conn.cursor()
+
+            # 检查用户是否已存在
             cur.execute('SELECT id FROM users WHERE username = %s OR email = %s', (username, email))
             if cur.fetchone():
                 flash('用户名或邮箱已存在', 'error')
@@ -168,11 +216,15 @@ def register():
             return redirect(url_for('login'))
 
         except Exception as e:
-            conn.rollback()
+            if conn:
+                conn.rollback()
             flash(f'注册失败: {str(e)}', 'error')
+            return render_template('register.html')
         finally:
-            cur.close()
-            conn.close()
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
 
     return render_template('register.html')
 
@@ -183,7 +235,6 @@ def logout():
     flash('您已成功退出登录', 'success')
     return redirect(url_for('login'))
 
-# 原有的API路由（添加登录保护）
 @app.route('/geocode')
 @login_required
 def geocode():
@@ -191,6 +242,9 @@ def geocode():
     address = request.args.get('address', '')
     if not address:
         return jsonify({'error': '地址参数缺失'}), 400
+
+    if not AMAP_SERVICE_KEY:
+        return jsonify({'success': False, 'error': '高德API配置缺失'})
 
     url = 'https://restapi.amap.com/v3/geocode/geo'
     params = {
@@ -200,7 +254,7 @@ def geocode():
     }
 
     try:
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=10)
         data = response.json()
 
         if data['status'] == '1' and data['geocodes']:
@@ -216,7 +270,7 @@ def geocode():
                 'district': data['geocodes'][0].get('district', '')
             })
         else:
-            return jsonify({'success': False, 'error': '地址解析失败'})
+            return jsonify({'success': False, 'error': data.get('info', '地址解析失败')})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -230,6 +284,9 @@ def reverse_geocode():
     if not lng or not lat:
         return jsonify({'error': '坐标参数缺失'}), 400
 
+    if not AMAP_SERVICE_KEY:
+        return jsonify({'success': False, 'error': '高德API配置缺失'})
+
     url = 'https://restapi.amap.com/v3/geocode/regeo'
     params = {
         'location': f'{lng},{lat}',
@@ -239,7 +296,7 @@ def reverse_geocode():
     }
 
     try:
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=10)
         data = response.json()
 
         if data['status'] == '1':
@@ -254,7 +311,7 @@ def reverse_geocode():
                 'district': address_component.get('district', '')
             })
         else:
-            return jsonify({'success': False, 'error': '逆地理编码失败'})
+            return jsonify({'success': False, 'error': data.get('info', '逆地理编码失败')})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -268,6 +325,9 @@ def search_poi():
     if not keywords or not location:
         return jsonify({'error': '参数缺失'}), 400
 
+    if not AMAP_SERVICE_KEY:
+        return jsonify({'success': False, 'error': '高德API配置缺失'})
+
     url = 'https://restapi.amap.com/v3/place/around'
     params = {
         'keywords': keywords,
@@ -279,7 +339,7 @@ def search_poi():
     }
 
     try:
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=10)
         data = response.json()
 
         if data['status'] == '1':
@@ -295,6 +355,43 @@ def search_poi():
                 })
             return jsonify({'success': True, 'pois': pois})
         else:
-            return jsonify({'success': False, 'error': '搜索失败'})
+            return jsonify({'success': False, 'error': data.get('info', '搜索失败')})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/health')
+def health_check():
+    """健康检查端点"""
+    db_status = 'connected' if get_db_connection() else 'disconnected'
+    config_status = check_environment()
+    
+    return jsonify({
+        'status': 'healthy',
+        'database': db_status,
+        'configuration': 'ok' if config_status else 'missing_configs',
+        'amap_web_key': 'configured' if AMAP_WEB_KEY else 'missing',
+        'amap_service_key': 'configured' if AMAP_SERVICE_KEY else 'missing'
+    })
+
+# Vercel需要这个变量
+app = app
+
+# 本地开发启动（在Vercel上不会执行）
+if __name__ == '__main__':
+    print("=" * 60)
+    print("🗺️  地图应用 - 本地开发版")
+    print("=" * 60)
+    
+    config_ok = check_environment()
+    if config_ok:
+        print("✅ 环境配置检查通过")
+    else:
+        print("⚠️  部分配置缺失，某些功能可能无法正常工作")
+    
+    print(f"🔑 高德Web Key: {'✅ 已配置' if AMAP_WEB_KEY else '❌ 未配置'}")
+    print(f"🔑 高德Service Key: {'✅ 已配置' if AMAP_SERVICE_KEY else '❌ 未配置'}")
+    print(f"🗄️  数据库: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
+    print("🌐 访问: http://localhost:5000")
+    print("=" * 60)
+    
+    app.run(debug=True, host='0.0.0.0', port=5000)
