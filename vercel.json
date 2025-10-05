@@ -2,12 +2,12 @@
   "version": 2,
   "builds": [
     {
-      "src": "app.py",
+      "src": "api/index.py",
       "use": "@vercel/python"
     },
     {
-      "src": "build.sh",
-      "use": "@vercel/static-build"
+      "src": "static/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
@@ -17,12 +17,7 @@
     },
     {
       "src": "/(.*)",
-      "dest": "/app.py"
+      "dest": "/api/index.py"
     }
-  ],
-  "functions": {
-    "app.py": {
-      "maxDuration": 30
-    }
-  }
+  ]
 }
