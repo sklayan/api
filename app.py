@@ -10,7 +10,12 @@ from dotenv import load_dotenv
 if os.path.exists('.env.local'):
     load_dotenv('.env.local')
 
-app = Flask(__name__)
+# 明确指定静态文件和模板路径
+app = Flask(__name__, 
+    static_folder='static',
+    static_url_path='/static',
+    template_folder='templates'
+)
 
 # 从环境变量获取配置
 secret_key = os.getenv('SECRET_KEY', 'vercel-default-secret-key-change-in-production')
@@ -34,21 +39,6 @@ DB_CONFIG = {
 # 高德API配置
 AMAP_WEB_KEY = os.getenv('AMAP_WEB_KEY')
 AMAP_SERVICE_KEY = os.getenv('AMAP_SERVICE_KEY')
-
-# 检查必要环境变量
-def check_environment():
-    missing_configs = []
-    if not AMAP_WEB_KEY:
-        missing_configs.append('AMAP_WEB_KEY')
-    if not AMAP_SERVICE_KEY:
-        missing_configs.append('AMAP_SERVICE_KEY')
-    if not all([DB_CONFIG['host'], DB_CONFIG['database'], DB_CONFIG['user'], DB_CONFIG['password']]):
-        missing_configs.append('数据库配置')
-    
-    if missing_configs:
-        print("⚠️  警告: 以下配置缺失:", ", ".join(missing_configs))
-        return False
-    return True
 
 class User(UserMixin):
     def __init__(self, id, username, email):
@@ -119,7 +109,6 @@ def init_db():
 # 初始化数据库
 init_db()
 
-# 路由定义
 @app.route('/')
 def index():
     if current_user.is_authenticated:
@@ -176,7 +165,6 @@ def register():
         password = request.form.get('password')
         confirm_password = request.form.get('confirm_password')
 
-        # 验证输入
         if not username or not email or not password:
             flash('请填写所有字段', 'error')
             return render_template('register.html')
@@ -197,21 +185,17 @@ def register():
         cur = None
         try:
             cur = conn.cursor()
-
-            # 检查用户是否已存在
             cur.execute('SELECT id FROM users WHERE username = %s OR email = %s', (username, email))
             if cur.fetchone():
                 flash('用户名或邮箱已存在', 'error')
                 return render_template('register.html')
 
-            # 创建新用户
             password_hash = generate_password_hash(password)
             cur.execute(
                 'INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s) RETURNING id',
                 (username, email, password_hash)
             )
             conn.commit()
-
             flash('注册成功！请登录。', 'success')
             return redirect(url_for('login'))
 
@@ -238,7 +222,6 @@ def logout():
 @app.route('/geocode')
 @login_required
 def geocode():
-    """地理编码：地址转坐标"""
     address = request.args.get('address', '')
     if not address:
         return jsonify({'error': '地址参数缺失'}), 400
@@ -277,7 +260,6 @@ def geocode():
 @app.route('/reverse_geocode')
 @login_required
 def reverse_geocode():
-    """逆地理编码：坐标转地址"""
     lng = request.args.get('lng', '')
     lat = request.args.get('lat', '')
 
@@ -318,7 +300,6 @@ def reverse_geocode():
 @app.route('/search_poi')
 @login_required
 def search_poi():
-    """搜索周边POI"""
     keywords = request.args.get('keywords', '')
     location = request.args.get('location', '')
 
@@ -361,14 +342,14 @@ def search_poi():
 
 @app.route('/health')
 def health_check():
-    """健康检查端点"""
     db_status = 'connected' if get_db_connection() else 'disconnected'
-    config_status = check_environment()
-    
     return jsonify({
         'status': 'healthy',
         'database': db_status,
-        'configuration': 'ok' if config_status else 'missing_configs',
         'amap_web_key': 'configured' if AMAP_WEB_KEY else 'missing',
         'amap_service_key': 'configured' if AMAP_SERVICE_KEY else 'missing'
     })
+
+# 本地开发
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)
