@@ -372,26 +372,3 @@ def health_check():
         'amap_web_key': 'configured' if AMAP_WEB_KEY else 'missing',
         'amap_service_key': 'configured' if AMAP_SERVICE_KEY else 'missing'
     })
-
-# Vercel需要这个变量
-app = app
-
-# 本地开发启动（在Vercel上不会执行）
-if __name__ == '__main__':
-    print("=" * 60)
-    print("🗺️  地图应用 - 本地开发版")
-    print("=" * 60)
-    
-    config_ok = check_environment()
-    if config_ok:
-        print("✅ 环境配置检查通过")
-    else:
-        print("⚠️  部分配置缺失，某些功能可能无法正常工作")
-    
-    print(f"🔑 高德Web Key: {'✅ 已配置' if AMAP_WEB_KEY else '❌ 未配置'}")
-    print(f"🔑 高德Service Key: {'✅ 已配置' if AMAP_SERVICE_KEY else '❌ 未配置'}")
-    print(f"🗄️  数据库: {DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
-    print("🌐 访问: http://localhost:5000")
-    print("=" * 60)
-    
-    app.run(debug=True, host='0.0.0.0', port=5000)
